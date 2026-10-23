@@ -29,15 +29,38 @@ function discoverDesktop() {
   return { appDir, appExe: path.join(appDir, 'Antigravity.exe'), appName: 'Antigravity' };
 }
 
+// AG 的 sidecar 服务经 cmd 包装以 Antigravity.exe 的 node 模式运行（--import=... dist/server.cjs），
+// 与 IDE 本体共用 exe 名，且 IDE 退出后仍会驻留；只按进程名判断会把残留 sidecar 误判成“AG 正在运行”。
+const SIDECAR_PATTERN = /(--import=|server\.cjs)/i;
+
+function isSidecarCommandLine(commandLine) {
+  return SIDECAR_PATTERN.test(String(commandLine || ''));
+}
+
+function hasIdeProcess(commandLines) {
+  return commandLines.some(line => !isSidecarCommandLine(line));
+}
+
+async function ideCommandLines() {
+  const script = 'Get-CimInstance Win32_Process -Filter "Name=\'Antigravity.exe\'" | ForEach-Object { $_.CommandLine }';
+  const { stdout } = await run('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', script], { windowsHide: true, timeout: 8000 });
+  return stdout.split(/\r?\n/).map(line => line.trim()).filter(Boolean);
+}
+
 async function desktopRunning() {
   try {
     if (process.platform === 'win32') {
       const { stdout } = await run('tasklist.exe', ['/FI', 'IMAGENAME eq Antigravity.exe', '/FO', 'CSV', '/NH'], { windowsHide: true, timeout: 4000 });
-      return /"Antigravity\.exe"/i.test(stdout);
+      if (!/"Antigravity\.exe"/i.test(stdout)) return false;
+      try {
+        const lines = await ideCommandLines();
+        // 命令行整体不可见时（如权限差异）无法区分，维持旧行为按“正在运行”处理
+        return lines.length === 0 ? true : hasIdeProcess(lines);
+      } catch { return true; }
     }
     const { stdout } = await run('pgrep', ['-x', 'Antigravity'], { timeout: 4000 });
     return /^\d+/m.test(stdout);
   } catch { return false; }
 }
 
-module.exports = { normalizePath, discoverDesktop, desktopRunning };
+module.exports = { normalizePath, discoverDesktop, desktopRunning, isSidecarCommandLine, hasIdeProcess };
