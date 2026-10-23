@@ -137,7 +137,6 @@ const accountActions = {
   'account-add': async () => {
     const snapshot = await api.addAccount('');
     renderAccounts(snapshot);
-    appendLog('SYSTEM', '已新增账户并切换，点击「启动 Antigravity」后在 AG 内完成 Google 登录即可', 'tag-proxy');
   },
   'account-remove': async () => {
     const select = element('accountSelect');
@@ -151,7 +150,6 @@ const accountActions = {
     disarmAccountRemove();
     try {
       renderAccounts(await api.removeAccount(item.id));
-      appendLog('SYSTEM', `已删除账户「${item.name}」及其数据目录`, 'tag-warn');
     } catch (error) { report(error); void refreshAccounts(); }
   }
 };
@@ -267,7 +265,6 @@ element('accountSelect').addEventListener('change', async event => {
   const id = event.target.value;
   try {
     renderAccounts(await api.selectAccount(id));
-    appendLog('SYSTEM', '账户已切换，下次启动 AG 时生效', 'tag-proxy');
   } catch (error) {
     report(error);
     await refreshAccounts();
