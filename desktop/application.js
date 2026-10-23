@@ -5,6 +5,7 @@ const { spawn } = require('node:child_process');
 const { createSettings, assertLaunchSettingsMutable } = require('../core/settings');
 const { createAccounts } = require('../core/accounts');
 const { createAgCred } = require('../core/agcred');
+const { createFlowStore, buildAuthUrl, openInBrowser, CALLBACK_PATH } = require('../core/agoauth');
 const { Events } = require('../core/events');
 const { Session } = require('../core/session');
 const { writeJson } = require('../core/storage');
@@ -18,7 +19,7 @@ const { createApi } = require('./api');
 const { LanguageService } = require('../adapters/desktop/language-service');
 const { ContextMonitor } = require('../features/context-monitor');
 
-function createApplication({ rootDir, dataDir, native = false, testMode = false, fetchBytes, agCred, onClose = () => {} }) {
+function createApplication({ rootDir, dataDir, native = false, testMode = false, fetchBytes, agCred, openUrl = openInBrowser, onClose = () => {} }) {
   fs.mkdirSync(dataDir, { recursive: true });
   const events = new Events(dataDir);
   const settings = createSettings(path.join(dataDir, 'settings.json'));
@@ -73,6 +74,10 @@ function createApplication({ rootDir, dataDir, native = false, testMode = false,
     return live.refreshToken;
   };
   const accountsSnapshot = async () => accounts.snapshot(await refreshLive());
+  // Pending Google authorization flows (see core/agoauth.js): each start creates a
+  // single-use state that the /oauth-callback route redeems.
+  const oauthFlows = createFlowStore();
+  const oauthRedirectUri = () => `http://127.0.0.1:${app.apiPort}${CALLBACK_PATH}`;
   const closeAgProcesses = async () => {
     await new Promise(resolve => {
       const killer = spawn('taskkill.exe', ['/F', '/IM', 'Antigravity.exe'], { windowsHide: true });
@@ -202,6 +207,39 @@ function createApplication({ rootDir, dataDir, native = false, testMode = false,
       events.publish({ accounts: accounts.snapshot(live.refreshToken) });
       return accounts.snapshot(live.refreshToken);
     },
+    // Add an account through Google's consent screen: open the authorize URL, wait for the
+    // redirect to our own loopback API, then exchange the code for pool tokens.
+    async startOAuth() {
+      const clients = await agcred.oauthClients();
+      if (!clients.length) throw new Error('未找到可用的 OAuth 客户端（无法读取 language_server.exe），请先安装 Antigravity');
+      const state = oauthFlows.begin();
+      const authUrl = buildAuthUrl({ clientId: clients[0].id, redirectUri: oauthRedirectUri(), state });
+      await openUrl(authUrl);
+      events.log('SYSTEM', '已生成 Google 授权链接并打开浏览器，请在页面中完成授权', 'tag-proxy');
+      return { authUrl };
+    },
+    async completeOAuth({ code, state }) {
+      if (!oauthFlows.consume(state)) throw new Error('授权会话无效或已过期，请重新点击「授权添加」');
+      const proxyPort = settings.get().port;
+      const token = await agcred.exchangeAuthCode({ code, redirectUri: oauthRedirectUri(), proxyPort });
+      if (!token.refreshToken) throw new Error('Google 未返回 refresh_token，无法加入账户池');
+      let email = null;
+      try {
+        email = await agcred.userinfoEmail(token.accessToken, proxyPort);
+      } catch { /* the token is still usable even if the profile lookup fails */ }
+      const account = accounts.upsert({
+        email, name: email || 'Google 授权账户',
+        accessToken: token.accessToken,
+        refreshToken: token.refreshToken,
+        expiryTs: Date.now() + token.expiresIn * 1000,
+        source: 'google'
+      });
+      await refreshLive(true);
+      const snapshot = accounts.snapshot(live.refreshToken);
+      events.log('SYSTEM', `已通过 Google 授权添加账户「${account.email || account.name}」`, 'tag-proxy');
+      events.publish({ accounts: snapshot });
+      return { account: snapshot.items.find(item => item.id === account.id) || null, accounts: snapshot };
+    },
     removeAccount(id) {
       const removed = accounts.snapshot().items.find(item => item.id === id);
       const snapshot = accounts.remove(id);
@@ -228,6 +266,7 @@ function createApplication({ rootDir, dataDir, native = false, testMode = false,
     },
     async start() {
       const port = await api.listen(native ? 0 : 19823);
+      app.apiPort = port;
       events.log('SYSTEM', `EasyAG 桌面内核就绪，已载入 ${Object.keys(dictionary).length} 条汉化词条`, 'tag-proxy');
       if (process.env.EASYAG_READY_FILE) writeJson(process.env.EASYAG_READY_FILE, { port, pid: process.pid });
       if (!native && !testMode) host.open(`http://127.0.0.1:${port}`);

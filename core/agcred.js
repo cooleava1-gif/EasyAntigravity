@@ -229,6 +229,36 @@ function createAgCred({ scriptPath, spawnProcess = spawn, execFileAsync = run, p
     throw new Error(`令牌刷新失败（${problems.join('; ')}）`);
   }
 
+  // The authorization code is bound to the client that issued the auth URL, so try the
+  // extracted clients in order - the right one accepts it, the others fail fast.
+  async function exchangeAuthCode({ code, redirectUri, proxyPort }) {
+    const clients = await oauthClients();
+    if (!clients.length) throw new Error('未找到可用的 OAuth 客户端（无法读取 language_server.exe 或 Orbit 账户文件）');
+    const problems = [];
+    for (const client of clients) {
+      const stdout = await http({
+        url: TOKEN_URL,
+        method: 'POST',
+        proxyPort,
+        form: {
+          client_id: client.id,
+          client_secret: client.secret,
+          code,
+          redirect_uri: redirectUri,
+          grant_type: 'authorization_code'
+        }
+      });
+      try {
+        return parseTokenResponse(stdout);
+      } catch (error) {
+        problems.push(error.message);
+        const detail = describeTokenError(stdout);
+        if (detail) problems.push(detail);
+      }
+    }
+    throw new Error(`授权码兑换令牌失败（${problems.join('; ')}）`);
+  }
+
   async function userinfoEmail(accessToken, proxyPort) {
     const stdout = await http({
       url: USERINFO_URL,
@@ -257,6 +287,8 @@ function createAgCred({ scriptPath, spawnProcess = spawn, execFileAsync = run, p
     readSystemCredential,
     writeSystemCredential,
     refreshAccessToken,
+    exchangeAuthCode,
+    oauthClients,
     userinfoEmail,
     ensureFresh
   };

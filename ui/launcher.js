@@ -39,7 +39,7 @@ function renderPhase(next) {
   button.classList.toggle('busy', busy);
   document.querySelectorAll('[data-port]').forEach(control => { control.disabled = locked; });
   element('proxyPortInput').disabled = locked;
-  for (const id of ['accountSelect', 'accountSwitchBtn', 'accountCaptureBtn', 'accountImportBtn', 'accountRemoveBtn']) {
+  for (const id of ['accountSelect', 'accountSwitchBtn', 'accountCaptureBtn', 'accountOAuthBtn', 'accountImportBtn', 'accountRemoveBtn']) {
     const control = element(id);
     if (control) control.disabled = locked;
   }
@@ -116,7 +116,7 @@ function renderAccounts(accounts) {
   const locked = ['preparing', 'launching'].includes(phase);
   const switchBtn = element('accountSwitchBtn');
   if (switchBtn) switchBtn.disabled = locked || !active;
-  for (const id of ['accountCaptureBtn', 'accountImportBtn']) {
+  for (const id of ['accountCaptureBtn', 'accountOAuthBtn', 'accountImportBtn']) {
     const button = element(id);
     if (button) button.disabled = locked;
   }
@@ -146,6 +146,11 @@ const accountActions = {
   },
   'account-capture': async () => {
     renderAccounts(await api.captureAccount());
+  },
+  'account-oauth': async () => {
+    // The browser must be driven to the consent screen by hand; the finished account
+    // arrives over the SSE stream when the callback redeems the code.
+    await api.startOAuth();
   },
   'account-import': async () => {
     const result = await api.importOrbitAccounts();

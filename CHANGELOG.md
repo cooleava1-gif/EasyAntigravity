@@ -21,6 +21,13 @@
 - 修复 AG 运行检测误报：按命令行过滤 IDE 退出后仍驻留的 sidecar 服务进程。
 - 移除此前的档案制（--user-data-dir）实现：AG 登录凭据为系统级共享，档案无法隔离登录身份。
 
+## 未发布：Google 授权添加账户（OAuth）
+
+- 新增「授权添加」：生成 Google 授权链接并打开浏览器，授权完成后回调自动把令牌收入账户池，全程无需手填 refresh_token。
+- 授权 scope 与 AG 自身登录完全一致（openid、cloud-platform、userinfo、cclog、experimentsandconfigs）；实测多请求 aicode 会被 Google 以 403 restricted_client 拒绝，故不请求。
+- 回调地址为本机回环 `http://127.0.0.1:<面板端口>/oauth-callback`；state 一次性且 10 分钟过期，可防伪造回调；授权码兑换依次尝试从 language_server.exe 运行时提取的 OAuth 客户端。
+- 授权成功后浏览器显示中文结果页，新账户通过 SSE 实时出现在启动器账户卡片，选中后点「切换」即可用。
+
 ## v3.0.0 (2026-09-27)
 
 ### 🛡️ ARES 风险特征库（Agent Risk Execution Signatures）

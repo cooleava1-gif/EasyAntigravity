@@ -25,6 +25,7 @@ export const api = {
   selectAccount: id => request('/api/accounts/select', { body: { id }, method: 'POST' }),
   switchAccount: id => request('/api/accounts/switch', { body: { id }, method: 'POST', timeoutMs: 60000 }),
   captureAccount: () => request('/api/accounts/capture', { method: 'POST', timeoutMs: 60000 }),
+  startOAuth: () => request('/api/accounts/oauth/start', { method: 'POST', timeoutMs: 60000 }),
   importOrbitAccounts: () => request('/api/accounts/orbit-import', { method: 'POST' }),
   addAccount: body => request('/api/accounts/add', { body, method: 'POST' }),
   removeAccount: id => request('/api/accounts/remove', { body: { id }, method: 'POST' })

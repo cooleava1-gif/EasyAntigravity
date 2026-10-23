@@ -98,6 +98,34 @@ function createApi(app) {
         const data = await readBody(request);
         return json(response, { ok: true, accounts: app.addAccount(data) });
       }
+      if (method === 'POST' && route === '/api/accounts/oauth/start') {
+        const result = await app.startOAuth();
+        return json(response, { ok: true, ...result });
+      }
+      if (method === 'GET' && route === '/oauth-callback') {
+        // Google redirects the browser here after consent; the page is user-facing, so
+        // report the outcome in Chinese and keep the tokens server-side.
+        const page = (title, detail) => `<!DOCTYPE html><html lang="zh-CN"><head><meta charset="utf-8">` +
+          `<meta name="viewport" content="width=device-width, initial-scale=1"><title>${title}</title>` +
+          `<style>body{font-family:system-ui,"Microsoft YaHei",sans-serif;background:#0f1115;color:#e6e6e6;` +
+          `display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0}` +
+          `.box{background:#1a1d24;border:1px solid #2a2e37;border-radius:12px;padding:32px 40px;max-width:420px;text-align:center}` +
+          `h1{font-size:18px;margin:0 0 12px}p{font-size:13px;color:#9aa0aa;margin:0;line-height:1.7}</style></head>` +
+          `<body><div class="box"><h1>${title}</h1><p>${detail}</p></div></body></html>`;
+        response.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' });
+        const denied = url.searchParams.get('error');
+        const code = url.searchParams.get('code');
+        const state = url.searchParams.get('state');
+        if (denied) return response.end(page('授权未完成', `Google 返回：${denied}。请回到 EasyAG 重新点击「授权添加」。`));
+        if (!code || !state) return response.end(page('回调参数缺失', '链接中缺少 code 或 state，请重新发起授权。'));
+        try {
+          const result = await app.completeOAuth({ code, state });
+          const email = result.account?.email;
+          return response.end(page('授权成功', `账户${email ? ` ${email} ` : ' '}已加入 EasyAG 账户池，可以关闭本页；回到 EasyAG 选中该账户点击「切换」即可使用。`));
+        } catch (error) {
+          return response.end(page('授权失败', `${error.message}。请回到 EasyAG 重新点击「授权添加」。`));
+        }
+      }
       if (method === 'POST' && route === '/api/accounts/remove') {
         const data = await readBody(request);
         return json(response, { ok: true, accounts: app.removeAccount(data.id) });
