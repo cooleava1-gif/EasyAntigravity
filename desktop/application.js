@@ -1,8 +1,10 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const os = require('node:os');
+const { spawn } = require('node:child_process');
 const { createSettings, assertLaunchSettingsMutable } = require('../core/settings');
 const { createAccounts } = require('../core/accounts');
+const { createAgCred } = require('../core/agcred');
 const { Events } = require('../core/events');
 const { Session } = require('../core/session');
 const { writeJson } = require('../core/storage');
@@ -10,21 +12,19 @@ const { loadDictionary } = require('../features/i18n');
 const { Updater } = require('../features/updater');
 const { CdpHub } = require('../adapters/desktop/cdp');
 const { rendererSource } = require('../adapters/desktop/renderer');
-const { createDesktopAdapter, defaultProfileDir } = require('../adapters/desktop');
+const { createDesktopAdapter } = require('../adapters/desktop');
 const { createHost } = require('./host');
 const { createApi } = require('./api');
 const { LanguageService } = require('../adapters/desktop/language-service');
 const { ContextMonitor } = require('../features/context-monitor');
 
-function createApplication({ rootDir, dataDir, native = false, testMode = false, fetchBytes, onClose = () => {} }) {
+function createApplication({ rootDir, dataDir, native = false, testMode = false, fetchBytes, agCred, onClose = () => {} }) {
   fs.mkdirSync(dataDir, { recursive: true });
   const events = new Events(dataDir);
   const settings = createSettings(path.join(dataDir, 'settings.json'));
-  const accounts = createAccounts(dataDir, {
-    appData: process.env.APPDATA || path.join(os.homedir(), '.config'),
-    defaultProfileDir: defaultProfileDir()
-  });
-  const desktop = createDesktopAdapter(testMode, accounts);
+  const accounts = createAccounts(dataDir);
+  const agcred = agCred || createAgCred({ scriptPath: path.join(rootDir, 'tools', 'agcred.ps1') });
+  const desktop = createDesktopAdapter(testMode);
   let dictionary = loadDictionary(rootDir, dataDir);
   const host = createHost({ native, testMode, events });
   const contextMonitor = new ContextMonitor(new LanguageService({ profile: () => desktop.profile }));
@@ -59,13 +59,41 @@ function createApplication({ rootDir, dataDir, native = false, testMode = false,
     }
   });
   let closing;
+  // The credential AG actually reads lives outside our registry, so cache a short-lived
+  // view of it to mark which pooled account is live in AG right now.
+  const live = { at: 0, refreshToken: null };
+  const LIVE_TTL_MS = 3000;
+  const refreshLive = async (force = false) => {
+    if (!force && Date.now() - live.at < LIVE_TTL_MS) return live.refreshToken;
+    live.at = Date.now();
+    try {
+      const credential = await agcred.readSystemCredential();
+      live.refreshToken = credential?.refreshToken || null;
+    } catch { live.refreshToken = null; }
+    return live.refreshToken;
+  };
+  const accountsSnapshot = async () => accounts.snapshot(await refreshLive());
+  const closeAgProcesses = async () => {
+    await new Promise(resolve => {
+      const killer = spawn('taskkill.exe', ['/F', '/IM', 'Antigravity.exe'], { windowsHide: true });
+      killer.once('error', () => resolve());
+      killer.once('close', () => resolve());
+    });
+    const deadline = Date.now() + 15000;
+    while (Date.now() < deadline) {
+      if (!await desktop.running()) return true;
+      await new Promise(resolve => setTimeout(resolve, 500));
+    }
+    return false;
+  };
   const app = {
-    rootDir, dataDir, events, settings, desktop, host, cdp, session, contextMonitor, updater, accounts,
+    rootDir, dataDir, events, settings, desktop, host, cdp, session, contextMonitor, updater, accounts, agcred,
+    accountsSnapshot,
     status() {
       return {
         ...settings.get(), ...session.snapshot(), ...cdp.status, ...updater.currentState(),
         dictEntries: Object.keys(dictionary).length, capabilities: desktop.capabilities,
-        accounts: accounts.snapshot()
+        accounts: accounts.snapshot(live.refreshToken)
       };
     },
     assertAgClosed(action) {
@@ -74,27 +102,110 @@ function createApplication({ rootDir, dataDir, native = false, testMode = false,
       }
     },
     selectAccount(id) {
-      this.assertAgClosed('切换账户');
       const snapshot = accounts.select(id);
-      contextMonitor.reset();
-      const active = snapshot.items.find(item => item.id === snapshot.activeId);
-      events.log('SYSTEM', `已切换到账户「${active?.name || id}」，下次启动 AG 时生效`, 'tag-proxy');
       events.publish({ accounts: snapshot });
       return snapshot;
     },
-    addAccount(name) {
-      this.assertAgClosed('新增账户');
-      const snapshot = accounts.add(name);
-      const active = snapshot.items.find(item => item.id === snapshot.activeId);
-      events.log('SYSTEM', `已新增账户「${active?.name}」并切换，点击启动后在 AG 内完成 Google 登录即可`, 'tag-proxy');
-      events.publish({ accounts: snapshot });
-      return snapshot;
+    // One-click switch, the way Orbit and cockpit-tools do it: refresh the token, rewrite
+    // the system credential AG reads, then restart AG so it logs in as that account.
+    async switchAccount(id) {
+      if (['preparing', 'launching'].includes(session.phase)) {
+        throw Object.assign(new Error('正在启动 AG，请稍候再切换'), { status: 409 });
+      }
+      const account = accounts.find(id);
+      if (!account) throw new Error('账户不存在');
+      const proxyPort = settings.get().port;
+      let fresh;
+      try {
+        fresh = await agcred.ensureFresh(account, proxyPort);
+      } catch (error) {
+        // Tokens captured from AG's own login belong to the IDE's built-in OAuth client and
+        // cannot be refreshed with the public client credentials. They are still valid for AG,
+        // which renews them itself, so fall back to the stored tokens instead of failing.
+        events.log('SYSTEM', `令牌预刷新失败（${error.message}），将使用已保存的令牌，AG 会自行续期`, 'tag-warn');
+        fresh = { accessToken: account.accessToken, refreshToken: account.refreshToken, expiryTs: account.expiryTs };
+      }
+      accounts.updateTokens(id, fresh);
+      accounts.select(id);
+      await agcred.writeSystemCredential(fresh);
+      await refreshLive(true);
+      let restarted = false;
+      const agWasRunning = session.phase === 'running' || await desktop.running();
+      if (agWasRunning) {
+        await closeAgProcesses();
+        if (session.phase === 'running') await session.finish('AG 已退出，正在切换到新账户');
+        const result = await session.launch();
+        restarted = result.ok;
+        if (!result.ok) throw new Error(`账户已切换，但 AG 重启失败：${result.error}`);
+      }
+      events.log('SYSTEM', `已切换到账户「${account.name}」${account.email ? `（${account.email}）` : ''}，${restarted ? 'AG 已以新账户重启' : '下次启动 AG 时生效'}`, 'tag-proxy');
+      events.publish({ accounts: accounts.snapshot(live.refreshToken) });
+      return { accounts: accounts.snapshot(live.refreshToken), restarted };
+    },
+    // Save the account AG is currently logged into as a pool entry.
+    async captureCurrentAccount() {
+      const credential = await agcred.readSystemCredential();
+      if (!credential) throw new Error('未检测到 AG 的登录凭据，请先在 AG 内登录');
+      let email = null;
+      try {
+        const fresh = await agcred.ensureFresh(credential, settings.get().port);
+        credential.accessToken = fresh.accessToken;
+        credential.refreshToken = fresh.refreshToken;
+        credential.expiryTs = fresh.expiryTs;
+        email = await agcred.userinfoEmail(fresh.accessToken, settings.get().port);
+      } catch { /* offline: keep the stored tokens as-is */ }
+      const account = accounts.upsert({
+        email, name: email || '当前 AG 登录',
+        accessToken: credential.accessToken,
+        refreshToken: credential.refreshToken,
+        expiryTs: credential.expiryTs,
+        source: 'current', select: true
+      });
+      await refreshLive(true);
+      events.log('SYSTEM', `已保存当前登录账户「${account.name}」`, 'tag-proxy');
+      events.publish({ accounts: accounts.snapshot(live.refreshToken) });
+      return accounts.snapshot(live.refreshToken);
+    },
+    // Import accounts from Antigravity-Orbit's account pool file.
+    importOrbitAccounts() {
+      const file = path.join(os.homedir(), '.gemini', 'antigravity', 'orbit_accounts.json');
+      let pool;
+      try {
+        pool = JSON.parse(fs.readFileSync(file, 'utf8'));
+      } catch {
+        throw new Error(`未找到 Orbit 账户文件：${file}`);
+      }
+      const entries = Array.isArray(pool?.accounts) ? pool.accounts : [];
+      let added = 0;
+      for (const entry of entries) {
+        const token = entry?.token || {};
+        if (!token.refresh_token) continue;
+        const before = accounts.snapshot().items.length;
+        accounts.upsert({
+          name: entry.name || entry.email,
+          email: entry.email,
+          accessToken: token.access_token,
+          refreshToken: token.refresh_token,
+          expiryTs: token.expiry ? Date.parse(token.expiry) || 0 : 0,
+          source: 'orbit'
+        });
+        if (accounts.snapshot().items.length > before) added += 1;
+      }
+      events.log('SYSTEM', added ? `已从 Orbit 导入 ${added} 个账户` : 'Orbit 中没有新账户可导入', 'tag-proxy');
+      events.publish({ accounts: accounts.snapshot(live.refreshToken) });
+      return { added, accounts: accounts.snapshot(live.refreshToken) };
+    },
+    addAccount({ email, refreshToken }) {
+      if (!refreshToken) throw new Error('请填写 refresh_token');
+      const account = accounts.upsert({ email, refreshToken, source: 'manual', select: true });
+      events.log('SYSTEM', `已添加账户「${account.name}」`, 'tag-proxy');
+      events.publish({ accounts: accounts.snapshot(live.refreshToken) });
+      return accounts.snapshot(live.refreshToken);
     },
     removeAccount(id) {
-      this.assertAgClosed('删除账户');
       const removed = accounts.snapshot().items.find(item => item.id === id);
       const snapshot = accounts.remove(id);
-      events.log('SYSTEM', `已删除账户「${removed?.name || id}」及其数据目录`, 'tag-warn');
+      events.log('SYSTEM', `已删除账户「${removed?.name || id}」`, 'tag-warn');
       events.publish({ accounts: snapshot });
       return snapshot;
     },
@@ -121,6 +232,10 @@ function createApplication({ rootDir, dataDir, native = false, testMode = false,
       if (process.env.EASYAG_READY_FILE) writeJson(process.env.EASYAG_READY_FILE, { port, pid: process.pid });
       if (!native && !testMode) host.open(`http://127.0.0.1:${port}`);
       void session.attachExisting().catch(error => events.log('SYSTEM', error.message, 'tag-warn'));
+      void refreshLive(true).catch(() => {});
+      // Pick up manual logins/logouts done inside AG itself.
+      const liveTimer = setInterval(() => { void refreshLive().catch(() => {}); }, 10000);
+      liveTimer.unref();
       return port;
     },
     close(reason) {

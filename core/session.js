@@ -31,10 +31,8 @@ class Session {
       if (await this.desktop.running()) throw new Error('请先退出已打开的 AG，再通过 EasyAG 启动以接入代理环境');
       if (this.closed || generation !== this.generation) throw new Error('启动已取消');
       const settings = this.settings.get();
-      const account = typeof this.desktop.accounts?.active === 'function' ? this.desktop.accounts.active() : null;
-      const userDataDir = account?.userDataDir || null;
       this.change('launching');
-      const launch = buildProxyLaunch(settings.port, this.cdp.port, undefined, userDataDir);
+      const launch = buildProxyLaunch(settings.port, this.cdp.port);
       const child = this.spawnProcess(target.appExe, launch.args, {
         env: launch.env, detached: false, stdio: 'ignore', windowsHide: false
       });
@@ -55,7 +53,7 @@ class Session {
       this.onStart();
       this.change('running');
       this.cdp.start();
-      this.events.log('SYSTEM', `Antigravity 已启动（账户「${account?.name || '默认档案'}」${userDataDir ? '· 独立数据目录' : ''}；本地代理 127.0.0.1:${settings.port}），增强功能正在连接`, 'tag-proxy');
+      this.events.log('SYSTEM', `Antigravity 已启动（本地代理 127.0.0.1:${settings.port}），增强功能正在连接`, 'tag-proxy');
       this.host.hide();
       return { ok: true };
     } catch (error) {

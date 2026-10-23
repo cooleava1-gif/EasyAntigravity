@@ -75,15 +75,28 @@ function createApi(app) {
         return json(response, result, result.ok ? 200 : 409);
       }
       if (method === 'GET' && route === '/api/accounts') {
-        return json(response, { ok: true, accounts: app.accounts.snapshot() });
+        return json(response, { ok: true, accounts: await app.accountsSnapshot() });
       }
       if (method === 'POST' && route === '/api/accounts/select') {
         const data = await readBody(request);
         return json(response, { ok: true, accounts: app.selectAccount(data.id) });
       }
+      if (method === 'POST' && route === '/api/accounts/switch') {
+        const data = await readBody(request);
+        const result = await app.switchAccount(data.id);
+        return json(response, { ok: true, ...result });
+      }
+      if (method === 'POST' && route === '/api/accounts/capture') {
+        const result = await app.captureCurrentAccount();
+        return json(response, { ok: true, accounts: result });
+      }
+      if (method === 'POST' && route === '/api/accounts/orbit-import') {
+        const result = app.importOrbitAccounts();
+        return json(response, { ok: true, ...result });
+      }
       if (method === 'POST' && route === '/api/accounts/add') {
         const data = await readBody(request);
-        return json(response, { ok: true, accounts: app.addAccount(data.name) });
+        return json(response, { ok: true, accounts: app.addAccount(data) });
       }
       if (method === 'POST' && route === '/api/accounts/remove') {
         const data = await readBody(request);

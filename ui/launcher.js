@@ -39,7 +39,7 @@ function renderPhase(next) {
   button.classList.toggle('busy', busy);
   document.querySelectorAll('[data-port]').forEach(control => { control.disabled = locked; });
   element('proxyPortInput').disabled = locked;
-  for (const id of ['accountSelect', 'accountAddBtn', 'accountRemoveBtn']) {
+  for (const id of ['accountSelect', 'accountSwitchBtn', 'accountCaptureBtn', 'accountImportBtn', 'accountRemoveBtn']) {
     const control = element(id);
     if (control) control.disabled = locked;
   }
@@ -87,8 +87,8 @@ let accountItems = [];
 let removeArmedAt = 0;
 
 function accountLabel(item) {
-  if (item.email) return `${item.name}（${item.email}）`;
-  return item.isDefault ? item.name : `${item.name}（未登录）`;
+  const live = item.isLive ? ' ·当前生效' : '';
+  return item.email ? `${item.name}（${item.email}）${live}` : `${item.name}${live}`;
 }
 
 function renderAccounts(accounts) {
@@ -102,24 +102,28 @@ function renderAccounts(accounts) {
     option.textContent = accountLabel(item);
     return option;
   }));
-  select.value = accounts.activeId;
+  if (accounts.items.some(item => item.id === accounts.activeId)) select.value = accounts.activeId;
   const active = accounts.items.find(item => item.id === accounts.activeId);
+  const live = accounts.items.find(item => item.isLive);
   const hint = element('accountHint');
   if (hint) {
-    hint.textContent = active?.userDataDir
-      ? `「${active.name}」使用独立数据目录，切换后重启 AG 生效`
-      : '默认档案直接使用 AG 自己的数据目录';
+    hint.textContent = live
+      ? `AG 当前登录：${live.email || live.name}；切换会重写登录凭据并重启 AG`
+      : '切换会重写 AG 的登录凭据并重启 AG，无需重新登录';
   }
-  const locked = ['preparing', 'launching', 'running'].includes(phase);
+  // Switching rewrites the credential and restarts AG, so it is only blocked while a
+  // launch is already in flight; the other actions never touch a running AG.
+  const locked = ['preparing', 'launching'].includes(phase);
+  const switchBtn = element('accountSwitchBtn');
+  if (switchBtn) switchBtn.disabled = locked || !active;
+  for (const id of ['accountCaptureBtn', 'accountImportBtn']) {
+    const button = element(id);
+    if (button) button.disabled = locked;
+  }
   const removeBtn = element('accountRemoveBtn');
   if (removeBtn) {
-    removeBtn.disabled = locked || Boolean(active?.isDefault);
+    removeBtn.disabled = locked || !active;
     if (previous !== accounts.activeId) disarmAccountRemove();
-  }
-  const addBtn = element('accountAddBtn');
-  if (addBtn) {
-    addBtn.disabled = locked;
-    addBtn.textContent = '＋ 新增';
   }
 }
 
@@ -134,14 +138,23 @@ async function refreshAccounts() {
 }
 
 const accountActions = {
-  'account-add': async () => {
-    const snapshot = await api.addAccount('');
-    renderAccounts(snapshot);
+  'account-switch': async () => {
+    const select = element('accountSelect');
+    if (!select.value) return;
+    const result = await api.switchAccount(select.value);
+    renderAccounts(result.accounts);
+  },
+  'account-capture': async () => {
+    renderAccounts(await api.captureAccount());
+  },
+  'account-import': async () => {
+    const result = await api.importOrbitAccounts();
+    renderAccounts(result.accounts);
   },
   'account-remove': async () => {
     const select = element('accountSelect');
     const item = accountItems.find(entry => entry.id === select.value);
-    if (!item || item.isDefault) return;
+    if (!item) return;
     if (Date.now() - removeArmedAt > 6000) {
       removeArmedAt = Date.now();
       element('accountRemoveBtn').textContent = '确认删除？';

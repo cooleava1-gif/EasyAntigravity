@@ -9,13 +9,12 @@ function defaultProfileDir() {
     : path.join(process.env.APPDATA || path.join(os.homedir(), '.config'), 'Antigravity');
 }
 
-// `profile` is a getter so CDP and the language service always observe the
-// data directory of the account selected in the launcher.
-function createDesktopAdapter(testMode = false, accounts = null) {
+// Antigravity keeps a single login in the system credential, so every account shares the
+// same profile directory; account switching rewrites the credential instead (core/agcred.js).
+function createDesktopAdapter(testMode = false) {
   return {
     kind: 'desktop',
-    get profile() { return accounts ? accounts.activeProfileDir() : defaultProfileDir(); },
-    accounts,
+    profile: defaultProfileDir(),
     capabilities: { cdp: true, metrics: true },
     locate() {
       const target = discoverDesktop();

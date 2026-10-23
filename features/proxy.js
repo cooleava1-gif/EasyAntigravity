@@ -1,4 +1,4 @@
-function buildProxyLaunch(port, cdpPort, environment = process.env, userDataDir = null) {
+function buildProxyLaunch(port, cdpPort, environment = process.env) {
   const proxy = `http://127.0.0.1:${port}`;
   const bypass = 'localhost,127.0.0.1,::1,[::1]';
   const args = [
@@ -7,7 +7,6 @@ function buildProxyLaunch(port, cdpPort, environment = process.env, userDataDir 
     `--proxy-server=${proxy}`,
     '--proxy-bypass-list=localhost;127.0.0.1;[::1]'
   ];
-  if (userDataDir) args.push(`--user-data-dir=${userDataDir}`);
   return {
     args,
     env: {

@@ -1,74 +1,67 @@
-const fs = require('node:fs');
 const path = require('node:path');
 const { randomUUID } = require('node:crypto');
 const { readJson, writeJson } = require('./storage');
 
-const DEFAULT_ACCOUNT_ID = 'default';
-const ACCOUNT_ROOT_NAME = 'EasyAG-Accounts';
-const EMAIL_KEY = 'jetski.onboarding.lastLoginUsername';
+// Token-pool registry. Antigravity keeps its IDE login in a system credential, so an
+// "account" here is just a set of OAuth tokens: switching means rewriting the credential
+// (see core/agcred.js) and restarting AG. No per-account data directories are needed.
+const STATE_VERSION = 2;
 
-function safeSlug(name) {
-  const slug = String(name || '').normalize('NFKC')
-    .replace(/[^\p{Letter}\p{Number}-]+/gu, '-')
-    .replace(/^-+|-+$/g, '')
-    .slice(0, 24);
-  return slug || 'account';
-}
-
-function readLoginEmail(profileDir) {
-  try {
-    const raw = JSON.parse(fs.readFileSync(path.join(profileDir, 'app_storage.json'), 'utf8'));
-    const email = raw[EMAIL_KEY];
-    return typeof email === 'string' && email.includes('@') ? email : null;
-  } catch { return null; }
-}
-
-// The default account keeps using Antigravity's own profile directory; every other
-// account gets an isolated directory so switching never mixes logins or history.
-function createAccounts(dataDir, { appData, defaultProfileDir }) {
+function createAccounts(dataDir) {
   const file = path.join(dataDir, 'accounts.json');
-  const accountRoot = path.join(appData, ACCOUNT_ROOT_NAME);
   let state = readJson(file, null);
-  if (!state || !Array.isArray(state.accounts) || !state.accounts.some(account => account.id === DEFAULT_ACCOUNT_ID)) {
-    state = { version: 1, activeId: DEFAULT_ACCOUNT_ID, accounts: [{ id: DEFAULT_ACCOUNT_ID, name: '默认档案', userDataDir: null, createdAt: Date.now() }] };
+  if (!state || state.version !== STATE_VERSION || !Array.isArray(state.accounts)) {
+    // v1 stored isolated profile directories; that model cannot switch logins because the
+    // credential is system-wide, so start a fresh pool instead of migrating.
+    state = { version: STATE_VERSION, accounts: [], activeId: null };
     writeJson(file, state);
   }
-  if (!state.accounts.some(account => account.id === state.activeId)) state.activeId = DEFAULT_ACCOUNT_ID;
   const save = () => writeJson(file, state);
   const find = id => state.accounts.find(account => account.id === id) || null;
-  const profileDirOf = account => account.userDataDir || defaultProfileDir;
-  const active = () => find(state.activeId) || find(DEFAULT_ACCOUNT_ID);
-  const emailCache = new Map();
-
-  const emailOf = account => {
-    const dir = profileDirOf(account);
-    const stamp = path.join(dir, 'app_storage.json');
-    try {
-      const mtime = fs.statSync(stamp).mtimeMs;
-      const cached = emailCache.get(account.id);
-      if (cached && cached.mtime === mtime) return cached.email;
-      const email = readLoginEmail(dir);
-      emailCache.set(account.id, { mtime, email });
-      return email;
-    } catch { return readLoginEmail(dir); }
-  };
-
-  const snapshot = () => ({
-    activeId: active().id,
-    items: state.accounts.map(account => ({
-      id: account.id,
-      name: account.name,
-      userDataDir: account.userDataDir || null,
-      profileDir: profileDirOf(account),
-      email: emailOf(account),
-      isDefault: account.id === DEFAULT_ACCOUNT_ID
-    }))
+  const publicView = (account, liveRefreshToken) => ({
+    id: account.id,
+    name: account.name,
+    email: account.email || null,
+    source: account.source,
+    expiryTs: account.expiryTs || null,
+    isLive: Boolean(liveRefreshToken) && account.refreshToken === liveRefreshToken
   });
+
+  const snapshot = (liveRefreshToken = null) => ({
+    activeId: state.activeId,
+    liveId: state.accounts.find(account => account.refreshToken === liveRefreshToken)?.id || null,
+    items: state.accounts.map(account => publicView(account, liveRefreshToken))
+  });
+
+  const upsert = ({ name, email, accessToken, refreshToken, expiryTs, source, select = false }) => {
+    if (!refreshToken) throw new Error('缺少 refresh_token');
+    let account = state.accounts.find(item => item.refreshToken === refreshToken);
+    if (account) {
+      account.accessToken = accessToken || account.accessToken;
+      account.expiryTs = expiryTs || account.expiryTs;
+      if (email && !account.email) account.email = email;
+    } else {
+      account = {
+        id: randomUUID(),
+        name: String(name || email || `账户 ${state.accounts.length + 1}`).slice(0, 40),
+        email: email || null,
+        accessToken: accessToken || '',
+        refreshToken,
+        expiryTs: expiryTs || 0,
+        source: source || 'manual',
+        createdAt: Date.now()
+      };
+      state.accounts.push(account);
+    }
+    if (select || !state.activeId) state.activeId = account.id;
+    save();
+    return account;
+  };
 
   return {
     snapshot,
-    active,
-    activeProfileDir: () => profileDirOf(active()),
+    active: () => find(state.activeId),
+    find,
     select(id) {
       const account = find(id);
       if (!account) throw new Error('账户不存在');
@@ -76,37 +69,25 @@ function createAccounts(dataDir, { appData, defaultProfileDir }) {
       save();
       return snapshot();
     },
-    add(name) {
-      const trimmed = String(name || '').trim().slice(0, 40) || `账户 ${state.accounts.length + 1}`;
-      const id = randomUUID();
-      const userDataDir = path.join(accountRoot, `${safeSlug(trimmed)}-${id.slice(0, 8)}`);
-      fs.mkdirSync(userDataDir, { recursive: true });
-      state.accounts.push({ id, name: trimmed, userDataDir, createdAt: Date.now() });
-      state.activeId = id;
-      save();
-      return snapshot();
-    },
-    rename(id, name) {
+    upsert,
+    updateTokens(id, { accessToken, refreshToken, expiryTs }) {
       const account = find(id);
       if (!account) throw new Error('账户不存在');
-      account.name = String(name || '').trim().slice(0, 40) || account.name;
+      if (accessToken) account.accessToken = accessToken;
+      if (refreshToken) account.refreshToken = refreshToken;
+      if (expiryTs) account.expiryTs = expiryTs;
       save();
-      return snapshot();
+      return account;
     },
     remove(id) {
       const account = find(id);
       if (!account) throw new Error('账户不存在');
-      if (account.id === DEFAULT_ACCOUNT_ID) throw new Error('默认档案不可删除');
-      const dir = profileDirOf(account);
-      // Only directories this registry created may be deleted.
-      if (dir.startsWith(accountRoot + path.sep)) fs.rmSync(dir, { recursive: true, force: true });
       state.accounts = state.accounts.filter(item => item.id !== id);
-      if (state.activeId === id) state.activeId = DEFAULT_ACCOUNT_ID;
-      emailCache.delete(id);
+      if (state.activeId === id) state.activeId = state.accounts[0]?.id || null;
       save();
       return snapshot();
     }
   };
 }
 
-module.exports = { createAccounts, DEFAULT_ACCOUNT_ID, ACCOUNT_ROOT_NAME };
+module.exports = { createAccounts };
