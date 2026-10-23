@@ -29,8 +29,9 @@ class LanguageService {
     const generation = this.generation;
     const task = (async () => {
       const rows = await this.processes();
+      const profile = typeof this.profile === 'function' ? this.profile() : this.profile;
       let server;
-      for (const file of logPaths(this.profile)) {
+      for (const file of logPaths(profile)) {
         try { server = serverFromDiscovery(await this.readLog(file, 'utf8'), rows); break; }
         catch { /* Try the next known host log path; do not expose paths or credentials. */ }
       }

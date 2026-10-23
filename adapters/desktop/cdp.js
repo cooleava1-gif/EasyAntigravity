@@ -117,9 +117,10 @@ class CdpHub {
 
   async findTargets() {
     let port = this.port;
-    if (this.profile) {
+    const profile = typeof this.profile === 'function' ? this.profile() : this.profile;
+    if (profile) {
       try {
-        const found = Number(fs.readFileSync(path.join(this.profile, 'DevToolsActivePort'), 'utf8').split(/\r?\n/)[0]);
+        const found = Number(fs.readFileSync(path.join(profile, 'DevToolsActivePort'), 'utf8').split(/\r?\n/)[0]);
         if (Number.isInteger(found) && found > 0 && found <= 65535) port = found;
       } catch { /* Launches with an explicit debug port do not always write this file. */ }
     }

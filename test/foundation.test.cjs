@@ -80,6 +80,30 @@ async function start() {
     assert.equal(status2.enableI18n, false);
     assert.equal(status2.enableContextMonitor, false);
 
+    const accounts = await (await fetch(app.url + '/api/accounts')).json();
+    assert.equal(accounts.accounts.items.length, 1, '初始应只有默认档案');
+    assert.equal(accounts.accounts.items[0].isDefault, true);
+
+    const added = await fetch(app.url + '/api/accounts/add', { method: 'POST', body: JSON.stringify({ name: '冒烟账户' }) });
+    assert.ok(added.ok);
+    const addedSnapshot = (await added.json()).accounts;
+    assert.equal(addedSnapshot.items.length, 2);
+    assert.equal(addedSnapshot.activeId, addedSnapshot.items[1].id);
+    assert.ok(fs.existsSync(addedSnapshot.items[1].userDataDir), '新增账户必须创建独立数据目录');
+
+    const backToDefault = await fetch(app.url + '/api/accounts/select', { method: 'POST', body: JSON.stringify({ id: 'default' }) });
+    assert.equal((await backToDefault.json()).accounts.activeId, 'default');
+
+    const removeDefault = await fetch(app.url + '/api/accounts/remove', { method: 'POST', body: JSON.stringify({ id: 'default' }) });
+    assert.equal(removeDefault.status, 400, '默认档案不可删除');
+
+    const removed = await fetch(app.url + '/api/accounts/remove', { method: 'POST', body: JSON.stringify({ id: addedSnapshot.items[1].id }) });
+    assert.ok(removed.ok);
+    const removedSnapshot = (await removed.json()).accounts;
+    assert.equal(removedSnapshot.items.length, 1);
+    assert.equal(removedSnapshot.activeId, 'default');
+    assert.ok(!fs.existsSync(addedSnapshot.items[1].userDataDir), '删除账户必须清理数据目录');
+
     console.log('PASS: foundation API smoke (ping/status/config/security)');
   } finally {
     try {

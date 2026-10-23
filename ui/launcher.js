@@ -39,6 +39,10 @@ function renderPhase(next) {
   button.classList.toggle('busy', busy);
   document.querySelectorAll('[data-port]').forEach(control => { control.disabled = locked; });
   element('proxyPortInput').disabled = locked;
+  for (const id of ['accountSelect', 'accountAddBtn', 'accountRemoveBtn']) {
+    const control = element(id);
+    if (control) control.disabled = locked;
+  }
   element('launchIcon').textContent = busy ? '◌' : next === 'running' ? '●' : next === 'error' ? '↻' : '🚀';
   element('launchText').textContent = {
     preparing: '正在准备代理环境…',
@@ -51,6 +55,7 @@ function renderPhase(next) {
 
 function renderStatus(status) {
   if (status.phase && !(launchPending && status.phase === 'idle')) renderPhase(status.phase);
+  if (status.accounts) renderAccounts(status.accounts);
   if (status.dictEntries !== undefined) {
     element('dictCountBadge').textContent = `· 已载入 ${status.dictEntries} 词条`;
   }
@@ -77,6 +82,79 @@ function loadSettings(status) {
   element('patchStatusBadge').textContent = '● 原生代理已就绪';
   renderStatus(status);
 }
+
+let accountItems = [];
+let removeArmedAt = 0;
+
+function accountLabel(item) {
+  if (item.email) return `${item.name}（${item.email}）`;
+  return item.isDefault ? item.name : `${item.name}（未登录）`;
+}
+
+function renderAccounts(accounts) {
+  const select = element('accountSelect');
+  if (!accounts || !select || !Array.isArray(accounts.items)) return;
+  accountItems = accounts.items;
+  const previous = select.value;
+  select.replaceChildren(...accounts.items.map(item => {
+    const option = document.createElement('option');
+    option.value = item.id;
+    option.textContent = accountLabel(item);
+    return option;
+  }));
+  select.value = accounts.activeId;
+  const active = accounts.items.find(item => item.id === accounts.activeId);
+  const hint = element('accountHint');
+  if (hint) {
+    hint.textContent = active?.userDataDir
+      ? `「${active.name}」使用独立数据目录，切换后重启 AG 生效`
+      : '默认档案直接使用 AG 自己的数据目录';
+  }
+  const locked = ['preparing', 'launching', 'running'].includes(phase);
+  const removeBtn = element('accountRemoveBtn');
+  if (removeBtn) {
+    removeBtn.disabled = locked || Boolean(active?.isDefault);
+    if (previous !== accounts.activeId) disarmAccountRemove();
+  }
+  const addBtn = element('accountAddBtn');
+  if (addBtn) {
+    addBtn.disabled = locked;
+    addBtn.textContent = '＋ 新增';
+  }
+}
+
+function disarmAccountRemove() {
+  removeArmedAt = 0;
+  const removeBtn = element('accountRemoveBtn');
+  if (removeBtn) removeBtn.textContent = '－ 删除';
+}
+
+async function refreshAccounts() {
+  try { renderAccounts((await api.status()).accounts); } catch { /* the SSE stream and the next poll retry */ }
+}
+
+const accountActions = {
+  'account-add': async () => {
+    const snapshot = await api.addAccount('');
+    renderAccounts(snapshot);
+    appendLog('SYSTEM', '已新增账户并切换，点击「启动 Antigravity」后在 AG 内完成 Google 登录即可', 'tag-proxy');
+  },
+  'account-remove': async () => {
+    const select = element('accountSelect');
+    const item = accountItems.find(entry => entry.id === select.value);
+    if (!item || item.isDefault) return;
+    if (Date.now() - removeArmedAt > 6000) {
+      removeArmedAt = Date.now();
+      element('accountRemoveBtn').textContent = '确认删除？';
+      return;
+    }
+    disarmAccountRemove();
+    try {
+      renderAccounts(await api.removeAccount(item.id));
+      appendLog('SYSTEM', `已删除账户「${item.name}」及其数据目录`, 'tag-warn');
+    } catch (error) { report(error); void refreshAccounts(); }
+  }
+};
 
 function persistSettings() {
   const payload = {
@@ -171,7 +249,8 @@ const actions = {
   'toggle-theme': toggleTheme,
   'check-update': checkUpdate,
   'copy-logs': copyLogs,
-  'clear-logs': () => { consoleBox.replaceChildren(); }
+  'clear-logs': () => { consoleBox.replaceChildren(); },
+  ...accountActions
 };
 
 document.addEventListener('click', event => {
@@ -182,6 +261,17 @@ document.addEventListener('click', event => {
     await persistSettings();
   } : actions[control.dataset.action];
   if (action) Promise.resolve().then(() => action(control)).catch(report);
+});
+
+element('accountSelect').addEventListener('change', async event => {
+  const id = event.target.value;
+  try {
+    renderAccounts(await api.selectAccount(id));
+    appendLog('SYSTEM', '账户已切换，下次启动 AG 时生效', 'tag-proxy');
+  } catch (error) {
+    report(error);
+    await refreshAccounts();
+  }
 });
 
 element('proxyPortInput').addEventListener('input', event => { event.target.value = event.target.value.replace(/\D/g, ''); });

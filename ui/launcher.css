@@ -349,6 +349,34 @@ body {
 .quick-tag:hover .tag-hint {
   opacity: 0.9;
 }
+.quick-tag:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.quick-tag:disabled:hover {
+  background: var(--surface-subtle);
+  border-color: var(--card-border);
+  color: var(--text-muted);
+}
+select.account-select {
+  background: var(--input-bg);
+  border: 1px solid var(--card-border);
+  color: var(--text-main, currentColor);
+  border-radius: 6px;
+  padding: 4px 8px;
+  font-size: 12px;
+  font-weight: 500;
+  max-width: 220px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+select.account-select:hover:not(:disabled) {
+  border-color: var(--primary);
+}
+select.account-select:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
 input[type="number"], input#proxyPortInput {
   background: var(--input-bg);
   border: 1px solid var(--card-border);

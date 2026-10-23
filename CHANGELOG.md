@@ -12,6 +12,14 @@
 - 汉化测试改为验证实际注入脚本；发布资源使用白名单并验证独立运行。
 - 当前专注 AG 桌面端；上下文、额度、速度面板仍待接入。
 
+## 未发布：多账户切换（fork 新增特性）
+
+- 新增档案制多账户：默认档案沿用 AG 自己的数据目录，新增账户各自使用 `%APPDATA%\EasyAG-Accounts\<账户>` 独立目录，互不串号。
+- 启动 AG 时按当前选中账户追加 `--user-data-dir` 参数；CDP 与 language service 改为动态解析档案目录，汉化 / 代理 / Pilot 对各档案独立生效。
+- 启动器新增「AG 账户」卡片：下拉切换、新增、两步确认删除；自动读取各档案登录邮箱作标注，未登录显示"未登录"。
+- 账户注册表落盘 `accounts.json`（EasyAG 数据目录），AG 运行中禁止切换 / 新增 / 删除（HTTP 409）。
+- 新增 `test/accounts.test.cjs`（9 例）并纳入 `npm test`；foundation 冒烟覆盖账户 API。
+
 ## v3.0.0 (2026-09-27)
 
 ### 🛡️ ARES 风险特征库（Agent Risk Execution Signatures）

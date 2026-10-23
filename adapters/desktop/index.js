@@ -3,12 +3,19 @@ const path = require('node:path');
 const os = require('node:os');
 const { discoverDesktop, desktopRunning } = require('./discovery');
 
-function createDesktopAdapter(testMode = false) {
-  const profile = process.platform === 'darwin'
+function defaultProfileDir() {
+  return process.platform === 'darwin'
     ? path.join(os.homedir(), 'Library/Application Support/Antigravity')
     : path.join(process.env.APPDATA || path.join(os.homedir(), '.config'), 'Antigravity');
+}
+
+// `profile` is a getter so CDP and the language service always observe the
+// data directory of the account selected in the launcher.
+function createDesktopAdapter(testMode = false, accounts = null) {
   return {
-    kind: 'desktop', profile,
+    kind: 'desktop',
+    get profile() { return accounts ? accounts.activeProfileDir() : defaultProfileDir(); },
+    accounts,
     capabilities: { cdp: true, metrics: true },
     locate() {
       const target = discoverDesktop();
@@ -18,4 +25,4 @@ function createDesktopAdapter(testMode = false) {
   };
 }
 
-module.exports = { createDesktopAdapter };
+module.exports = { createDesktopAdapter, defaultProfileDir };

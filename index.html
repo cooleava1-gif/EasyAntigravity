@@ -84,6 +84,22 @@
     </div>
   </div>
 
+  <!-- 卡片: AG 账户（多账户切换） -->
+  <div class="card">
+    <div class="card-label">AG 账户 · 多账户切换</div>
+    <div class="row">
+      <span style="font-weight: 500;">当前账户:</span>
+      <select id="accountSelect" class="account-select" aria-label="选择 AG 账户"></select>
+    </div>
+    <div class="row">
+      <span style="font-size: 11px; color: var(--text-dark);" id="accountHint">默认档案直接使用 AG 自己的数据目录</span>
+      <div class="port-cluster">
+        <button type="button" class="quick-tag" id="accountAddBtn" data-action="account-add" title="新增一个 AG 账户（独立数据目录，首次启动需在 AG 内登录 Google）">＋ 新增</button>
+        <button type="button" class="quick-tag" id="accountRemoveBtn" data-action="account-remove" title="删除选中的非默认账户及其数据目录（含登录状态与历史）">－ 删除</button>
+      </div>
+    </div>
+  </div>
+
   <!-- 核心启动按钮 -->
   <button class="launch-btn" id="launchBtn" data-action="launch">
     <span class="launch-icon" id="launchIcon">🚀</span>

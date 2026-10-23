@@ -1,13 +1,15 @@
-function buildProxyLaunch(port, cdpPort, environment = process.env) {
+function buildProxyLaunch(port, cdpPort, environment = process.env, userDataDir = null) {
   const proxy = `http://127.0.0.1:${port}`;
   const bypass = 'localhost,127.0.0.1,::1,[::1]';
+  const args = [
+    `--remote-debugging-port=${cdpPort}`,
+    '--remote-debugging-address=127.0.0.1',
+    `--proxy-server=${proxy}`,
+    '--proxy-bypass-list=localhost;127.0.0.1;[::1]'
+  ];
+  if (userDataDir) args.push(`--user-data-dir=${userDataDir}`);
   return {
-    args: [
-      `--remote-debugging-port=${cdpPort}`,
-      '--remote-debugging-address=127.0.0.1',
-      `--proxy-server=${proxy}`,
-      '--proxy-bypass-list=localhost;127.0.0.1;[::1]'
-    ],
+    args,
     env: {
       ...environment,
       HTTP_PROXY: proxy, HTTPS_PROXY: proxy, http_proxy: proxy, https_proxy: proxy,

@@ -1,6 +1,8 @@
 const fs = require('node:fs');
 const path = require('node:path');
+const os = require('node:os');
 const { createSettings, assertLaunchSettingsMutable } = require('../core/settings');
+const { createAccounts } = require('../core/accounts');
 const { Events } = require('../core/events');
 const { Session } = require('../core/session');
 const { writeJson } = require('../core/storage');
@@ -8,7 +10,7 @@ const { loadDictionary } = require('../features/i18n');
 const { Updater } = require('../features/updater');
 const { CdpHub } = require('../adapters/desktop/cdp');
 const { rendererSource } = require('../adapters/desktop/renderer');
-const { createDesktopAdapter } = require('../adapters/desktop');
+const { createDesktopAdapter, defaultProfileDir } = require('../adapters/desktop');
 const { createHost } = require('./host');
 const { createApi } = require('./api');
 const { LanguageService } = require('../adapters/desktop/language-service');
@@ -18,14 +20,18 @@ function createApplication({ rootDir, dataDir, native = false, testMode = false,
   fs.mkdirSync(dataDir, { recursive: true });
   const events = new Events(dataDir);
   const settings = createSettings(path.join(dataDir, 'settings.json'));
-  const desktop = createDesktopAdapter(testMode);
+  const accounts = createAccounts(dataDir, {
+    appData: process.env.APPDATA || path.join(os.homedir(), '.config'),
+    defaultProfileDir: defaultProfileDir()
+  });
+  const desktop = createDesktopAdapter(testMode, accounts);
   let dictionary = loadDictionary(rootDir, dataDir);
   const host = createHost({ native, testMode, events });
-  const contextMonitor = new ContextMonitor(new LanguageService({ profile: desktop.profile }));
+  const contextMonitor = new ContextMonitor(new LanguageService({ profile: () => desktop.profile }));
   let session;
   let lastStatus = '';
   const cdp = new CdpHub({
-    profile: desktop.profile,
+    profile: () => desktop.profile,
     source: binding => rendererSource(dictionary, settings.get(), binding),
     onMetrics: id => settings.get().enableContextMonitor && session?.phase === 'running' && !testMode
       ? contextMonitor.sample(id) : Promise.resolve({ conversationId: id, state: 'unavailable', context: null, speed: null }),
@@ -54,12 +60,43 @@ function createApplication({ rootDir, dataDir, native = false, testMode = false,
   });
   let closing;
   const app = {
-    rootDir, dataDir, events, settings, desktop, host, cdp, session, contextMonitor, updater,
+    rootDir, dataDir, events, settings, desktop, host, cdp, session, contextMonitor, updater, accounts,
     status() {
       return {
         ...settings.get(), ...session.snapshot(), ...cdp.status, ...updater.currentState(),
-        dictEntries: Object.keys(dictionary).length, capabilities: desktop.capabilities
+        dictEntries: Object.keys(dictionary).length, capabilities: desktop.capabilities,
+        accounts: accounts.snapshot()
       };
+    },
+    assertAgClosed(action) {
+      if (['running', 'preparing', 'launching'].includes(session.phase)) {
+        throw Object.assign(new Error(`请先退出 AG 再${action}`), { status: 409 });
+      }
+    },
+    selectAccount(id) {
+      this.assertAgClosed('切换账户');
+      const snapshot = accounts.select(id);
+      contextMonitor.reset();
+      const active = snapshot.items.find(item => item.id === snapshot.activeId);
+      events.log('SYSTEM', `已切换到账户「${active?.name || id}」，下次启动 AG 时生效`, 'tag-proxy');
+      events.publish({ accounts: snapshot });
+      return snapshot;
+    },
+    addAccount(name) {
+      this.assertAgClosed('新增账户');
+      const snapshot = accounts.add(name);
+      const active = snapshot.items.find(item => item.id === snapshot.activeId);
+      events.log('SYSTEM', `已新增账户「${active?.name}」并切换，点击启动后在 AG 内完成 Google 登录即可`, 'tag-proxy');
+      events.publish({ accounts: snapshot });
+      return snapshot;
+    },
+    removeAccount(id) {
+      this.assertAgClosed('删除账户');
+      const removed = accounts.snapshot().items.find(item => item.id === id);
+      const snapshot = accounts.remove(id);
+      events.log('SYSTEM', `已删除账户「${removed?.name || id}」及其数据目录`, 'tag-warn');
+      events.publish({ accounts: snapshot });
+      return snapshot;
     },
     async reloadDictionary() {
       dictionary = loadDictionary(rootDir, dataDir);

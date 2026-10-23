@@ -74,6 +74,21 @@ function createApi(app) {
         const result = await app.session.launch();
         return json(response, result, result.ok ? 200 : 409);
       }
+      if (method === 'GET' && route === '/api/accounts') {
+        return json(response, { ok: true, accounts: app.accounts.snapshot() });
+      }
+      if (method === 'POST' && route === '/api/accounts/select') {
+        const data = await readBody(request);
+        return json(response, { ok: true, accounts: app.selectAccount(data.id) });
+      }
+      if (method === 'POST' && route === '/api/accounts/add') {
+        const data = await readBody(request);
+        return json(response, { ok: true, accounts: app.addAccount(data.name) });
+      }
+      if (method === 'POST' && route === '/api/accounts/remove') {
+        const data = await readBody(request);
+        return json(response, { ok: true, accounts: app.removeAccount(data.id) });
+      }
       if (method === 'POST' && route === '/api/update') {
         const data = await readBody(request);
         const result = await app.updater.checkAndApply({ manifestUrl: data.manifestUrl });
@@ -93,7 +108,7 @@ function createApi(app) {
       return json(response, { ok: false, error: 'not found', url: request.url }, 404);
     } catch (error) {
       app.events.log('SYSTEM', error.message, 'tag-warn');
-      if (!response.headersSent) json(response, { ok: false, error: error.message }, 400);
+      if (!response.headersSent) json(response, { ok: false, error: error.message }, error.status || 400);
       else response.end();
     }
   });

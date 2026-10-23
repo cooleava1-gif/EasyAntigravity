@@ -21,5 +21,8 @@ export const api = {
   launch: () => request('/api/launch', { method: 'POST' }),
   checkUpdate: body => request('/api/update', { body: body || {}, method: 'POST', timeoutMs: 60000 }),
   setTheme: theme => request('/api/theme', { body: { theme }, method: 'POST' }),
-  hide: () => request('/api/hide', { method: 'POST' })
+  hide: () => request('/api/hide', { method: 'POST' }),
+  selectAccount: id => request('/api/accounts/select', { body: { id }, method: 'POST' }),
+  addAccount: name => request('/api/accounts/add', { body: { name }, method: 'POST' }),
+  removeAccount: id => request('/api/accounts/remove', { body: { id }, method: 'POST' })
 };
