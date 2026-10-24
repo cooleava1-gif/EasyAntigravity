@@ -43,6 +43,34 @@ test('upsert rejects entries without a refresh token', () => {
   assert.throws(() => accounts.upsert({ email: 'a@gmail.com' }), /refresh_token/);
 });
 
+test('upsert merges by email so one Google account is one pool entry', () => {
+  const { accounts } = fixture();
+  const first = accounts.upsert({ email: 'a@gmail.com', refreshToken: 'rt-a', name: 'A 君', source: 'orbit' });
+  // 同一个邮箱但不同的 refresh_token（重新授权、或重新保存当前登录）必须合并，
+  // 而不是留下一个没有邮箱的"当前 AG 登录"式重复条目。
+  const again = accounts.upsert({ email: 'A@Gmail.com', refreshToken: 'rt-a2', accessToken: 'at-new', source: 'current' });
+  assert.equal(again.id, first.id, '同一邮箱必须合并（忽略大小写）');
+  assert.equal(accounts.snapshot().items.length, 1);
+  assert.equal(accounts.find(first.id).refreshToken, 'rt-a2', '合并后应换成新令牌');
+  assert.equal(accounts.find(first.id).accessToken, 'at-new');
+  assert.equal(accounts.find(first.id).name, 'A 君', '已有名字的条目保留原名');
+  assert.equal(accounts.find(first.id).source, 'current');
+
+  const other = accounts.upsert({ email: 'b@gmail.com', refreshToken: 'rt-b' });
+  assert.notEqual(other.id, first.id, '不同邮箱仍是不同条目');
+  assert.equal(accounts.snapshot().items.length, 2);
+});
+
+test('upsert fills in a missing email when the same token comes back', () => {
+  const { accounts } = fixture();
+  const first = accounts.upsert({ refreshToken: 'rt-x', name: 'AG 登录账户' });
+  assert.equal(accounts.snapshot().items[0].email, null);
+  const again = accounts.upsert({ email: 'x@gmail.com', refreshToken: 'rt-x' });
+  assert.equal(again.id, first.id);
+  assert.equal(accounts.snapshot().items[0].email, 'x@gmail.com');
+  assert.equal(accounts.snapshot().items[0].name, 'x@gmail.com', '补识邮箱后用邮箱做名字');
+});
+
 test('snapshot never leaks tokens and flags the live account', () => {
   const { accounts } = fixture();
   const account = accounts.upsert({ email: 'a@gmail.com', refreshToken: 'rt-a', accessToken: 'at-a' });

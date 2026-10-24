@@ -160,7 +160,7 @@ function createApplication({ rootDir, dataDir, native = false, testMode = false,
         email = await agcred.userinfoEmail(fresh.accessToken, settings.get().port);
       } catch { /* offline: keep the stored tokens as-is */ }
       const account = accounts.upsert({
-        email, name: email || '当前 AG 登录',
+        email, name: email || 'AG 登录账户',
         accessToken: credential.accessToken,
         refreshToken: credential.refreshToken,
         expiryTs: credential.expiryTs,

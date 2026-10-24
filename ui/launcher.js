@@ -88,7 +88,8 @@ let removeArmedAt = 0;
 
 function accountLabel(item) {
   const live = item.isLive ? ' ·当前生效' : '';
-  return item.email ? `${item.name}（${item.email}）${live}` : `${item.name}${live}`;
+  const identity = !item.email || item.name === item.email ? item.name : `${item.name}（${item.email}）`;
+  return `${identity}${live}`;
 }
 
 function renderAccounts(accounts) {

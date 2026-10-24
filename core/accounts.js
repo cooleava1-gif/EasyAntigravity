@@ -35,11 +35,21 @@ function createAccounts(dataDir) {
 
   const upsert = ({ name, email, accessToken, refreshToken, expiryTs, source, select = false }) => {
     if (!refreshToken) throw new Error('缺少 refresh_token');
-    let account = state.accounts.find(item => item.refreshToken === refreshToken);
+    // One pool entry per Google account, the way cockpit-tools pools accounts: match the
+    // refresh token first, then the email, so re-authorizing or re-capturing a known
+    // account refreshes its tokens instead of leaving a duplicate behind.
+    const normalizedEmail = email ? String(email).trim().toLowerCase() : null;
+    let account = state.accounts.find(item => item.refreshToken === refreshToken)
+      || (normalizedEmail ? state.accounts.find(item => (item.email || '').trim().toLowerCase() === normalizedEmail) : null);
     if (account) {
       account.accessToken = accessToken || account.accessToken;
+      account.refreshToken = refreshToken;
       account.expiryTs = expiryTs || account.expiryTs;
-      if (email && !account.email) account.email = email;
+      if (source) account.source = source;
+      if (email && !account.email) {
+        account.email = email;
+        account.name = String(name || email).slice(0, 40);
+      }
     } else {
       account = {
         id: randomUUID(),
