@@ -14,13 +14,14 @@
 
 ## 未发布：多账户一键切换（令牌池）
 
-- 新增令牌池账户管理：保存当前登录、从 Antigravity-Orbit 账户文件导入、手动粘贴 refresh_token。
+- 新增令牌池账户管理：Google 授权添加、保存当前登录、手动粘贴 refresh_token。
 - 一键切换：刷新令牌后重写 AG 系统登录凭据（Windows 凭据管理器 `gemini:antigravity`）并重启 AG，无需登录页；AG 运行中会自动关闭再以新账户重启。
-- 令牌刷新依次尝试公开 OAuth 客户端与 AG IDE 内置客户端（提取自 language_server.exe），Orbit 令牌与 AG 自身登录产生的令牌均可自动续期。
+- 令牌刷新依次尝试公开 OAuth 客户端与 AG IDE 内置客户端（提取自 language_server.exe），两类签发的令牌均可自动续期。
 - 启动器账户卡片显示邮箱与"当前生效"标注，自动识别在 AG 内手动登录/登出的账户变化。
 - 修复 AG 运行检测误报：按命令行过滤 IDE 退出后仍驻留的 sidecar 服务进程。
 - 移除此前的档案制（--user-data-dir）实现：AG 登录凭据为系统级共享，档案无法隔离登录身份。
 - 账户池按邮箱归并：一个 Google 账户只保留一条，重新授权或重新保存当前登录都会更新该条目的令牌并补全邮箱，不再产生无邮箱的"当前 AG 登录"式占位条目（对齐 cockpit-tools 的账户列表形态）。
+- 移除「导入 Orbit」入口与 Orbit 账户文件回退逻辑（Orbit 已完整卸载）；加账户统一走「授权添加」。
 
 ## 未发布：Google 授权添加账户（OAuth）
 

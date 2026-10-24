@@ -1,6 +1,5 @@
 const fs = require('node:fs');
 const path = require('node:path');
-const os = require('node:os');
 const { spawn } = require('node:child_process');
 const { createSettings, assertLaunchSettingsMutable } = require('../core/settings');
 const { createAccounts } = require('../core/accounts');
@@ -111,7 +110,7 @@ function createApplication({ rootDir, dataDir, native = false, testMode = false,
       events.publish({ accounts: snapshot });
       return snapshot;
     },
-    // One-click switch, the way Orbit and cockpit-tools do it: refresh the token, rewrite
+    // One-click switch, the way cockpit-tools does it: refresh the token, rewrite
     // the system credential AG reads, then restart AG so it logs in as that account.
     async switchAccount(id) {
       if (['preparing', 'launching'].includes(session.phase)) {
@@ -170,35 +169,6 @@ function createApplication({ rootDir, dataDir, native = false, testMode = false,
       events.log('SYSTEM', `已保存当前登录账户「${account.name}」`, 'tag-proxy');
       events.publish({ accounts: accounts.snapshot(live.refreshToken) });
       return accounts.snapshot(live.refreshToken);
-    },
-    // Import accounts from Antigravity-Orbit's account pool file.
-    importOrbitAccounts() {
-      const file = path.join(os.homedir(), '.gemini', 'antigravity', 'orbit_accounts.json');
-      let pool;
-      try {
-        pool = JSON.parse(fs.readFileSync(file, 'utf8'));
-      } catch {
-        throw new Error(`未找到 Orbit 账户文件：${file}`);
-      }
-      const entries = Array.isArray(pool?.accounts) ? pool.accounts : [];
-      let added = 0;
-      for (const entry of entries) {
-        const token = entry?.token || {};
-        if (!token.refresh_token) continue;
-        const before = accounts.snapshot().items.length;
-        accounts.upsert({
-          name: entry.name || entry.email,
-          email: entry.email,
-          accessToken: token.access_token,
-          refreshToken: token.refresh_token,
-          expiryTs: token.expiry ? Date.parse(token.expiry) || 0 : 0,
-          source: 'orbit'
-        });
-        if (accounts.snapshot().items.length > before) added += 1;
-      }
-      events.log('SYSTEM', added ? `已从 Orbit 导入 ${added} 个账户` : 'Orbit 中没有新账户可导入', 'tag-proxy');
-      events.publish({ accounts: accounts.snapshot(live.refreshToken) });
-      return { added, accounts: accounts.snapshot(live.refreshToken) };
     },
     addAccount({ email, refreshToken }) {
       if (!refreshToken) throw new Error('请填写 refresh_token');

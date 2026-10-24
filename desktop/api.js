@@ -90,10 +90,6 @@ function createApi(app) {
         const result = await app.captureCurrentAccount();
         return json(response, { ok: true, accounts: result });
       }
-      if (method === 'POST' && route === '/api/accounts/orbit-import') {
-        const result = app.importOrbitAccounts();
-        return json(response, { ok: true, ...result });
-      }
       if (method === 'POST' && route === '/api/accounts/add') {
         const data = await readBody(request);
         return json(response, { ok: true, accounts: app.addAccount(data) });

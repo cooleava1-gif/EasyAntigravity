@@ -1,6 +1,5 @@
 const fs = require('node:fs');
 const path = require('node:path');
-const os = require('node:os');
 const { spawn, execFile } = require('node:child_process');
 const { promisify } = require('node:util');
 const run = promisify(execFile);
@@ -25,7 +24,7 @@ function languageServerCandidates() {
 }
 
 // The OAuth clients that may hold Antigravity refresh tokens (the IDE's own client and the
-// public client Orbit-style managers authorize with) are embedded in language_server.exe.
+// public client manager tools authorize with) are embedded in language_server.exe.
 // Extract them at runtime: no client credentials live in this repository, and AG updates
 // that rotate them keep working. Ids and secrets are separate strings, so try every
 // pairing - a wrong pair fails fast with unauthorized_client.
@@ -57,24 +56,8 @@ async function scanBinaryForClients() {
   return [];
 }
 
-// Fallback when the binary cannot be read: Orbit stores the client credentials next to
-// each token in its account pool file.
-function clientsFromOrbitFile() {
-  try {
-    const file = path.join(os.homedir(), '.gemini', 'antigravity', 'orbit_accounts.json');
-    const pool = JSON.parse(fs.readFileSync(file, 'utf8'));
-    for (const account of pool.accounts || []) {
-      const token = account?.token || {};
-      if (token.client_id && token.client_secret) return [{ id: token.client_id, secret: token.client_secret }];
-    }
-  } catch { /* no Orbit pool available */ }
-  return [];
-}
-
 async function loadOauthClients() {
-  const clients = await scanBinaryForClients();
-  if (clients.length) return clients;
-  return clientsFromOrbitFile();
+  return scanBinaryForClients();
 }
 
 function toRfc3339Micros(timestampMs) {
@@ -205,7 +188,7 @@ function createAgCred({ scriptPath, spawnProcess = spawn, execFileAsync = run, p
   async function refreshAccessToken(refreshToken, proxyPort) {
     const problems = [];
     const clients = await oauthClients();
-    if (!clients.length) throw new Error('未找到可用的 OAuth 客户端（无法读取 language_server.exe 或 Orbit 账户文件）');
+    if (!clients.length) throw new Error('未找到可用的 OAuth 客户端（无法读取 language_server.exe）');
     for (const client of clients) {
       const stdout = await http({
         url: TOKEN_URL,
@@ -233,7 +216,7 @@ function createAgCred({ scriptPath, spawnProcess = spawn, execFileAsync = run, p
   // extracted clients in order - the right one accepts it, the others fail fast.
   async function exchangeAuthCode({ code, redirectUri, proxyPort }) {
     const clients = await oauthClients();
-    if (!clients.length) throw new Error('未找到可用的 OAuth 客户端（无法读取 language_server.exe 或 Orbit 账户文件）');
+    if (!clients.length) throw new Error('未找到可用的 OAuth 客户端（无法读取 language_server.exe）');
     const problems = [];
     for (const client of clients) {
       const stdout = await http({

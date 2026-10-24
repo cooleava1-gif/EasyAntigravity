@@ -24,7 +24,7 @@ test('registry starts with an empty pool', () => {
 
 test('upsert adds an account, selects it and dedupes by refresh token', () => {
   const { accounts } = fixture();
-  const first = accounts.upsert({ email: 'a@gmail.com', refreshToken: 'rt-a', source: 'orbit' });
+  const first = accounts.upsert({ email: 'a@gmail.com', refreshToken: 'rt-a', source: 'manual' });
   assert.equal(accounts.snapshot().activeId, first.id);
   assert.equal(accounts.snapshot().items.length, 1);
 
@@ -45,7 +45,7 @@ test('upsert rejects entries without a refresh token', () => {
 
 test('upsert merges by email so one Google account is one pool entry', () => {
   const { accounts } = fixture();
-  const first = accounts.upsert({ email: 'a@gmail.com', refreshToken: 'rt-a', name: 'A 君', source: 'orbit' });
+  const first = accounts.upsert({ email: 'a@gmail.com', refreshToken: 'rt-a', name: 'A 君', source: 'manual' });
   // 同一个邮箱但不同的 refresh_token（重新授权、或重新保存当前登录）必须合并，
   // 而不是留下一个没有邮箱的"当前 AG 登录"式重复条目。
   const again = accounts.upsert({ email: 'A@Gmail.com', refreshToken: 'rt-a2', accessToken: 'at-new', source: 'current' });
@@ -105,7 +105,7 @@ test('select, updateTokens and remove manage the pool', () => {
 test('registry state survives a reload', () => {
   const { dataDir } = fixture();
   const first = createAccounts(dataDir);
-  const account = first.upsert({ email: 'a@gmail.com', refreshToken: 'rt-a', source: 'orbit' });
+  const account = first.upsert({ email: 'a@gmail.com', refreshToken: 'rt-a', source: 'manual' });
   const second = createAccounts(dataDir);
   assert.equal(second.snapshot().items.length, 1);
   assert.equal(second.snapshot().items[0].email, 'a@gmail.com');
