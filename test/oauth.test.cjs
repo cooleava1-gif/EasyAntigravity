@@ -23,7 +23,9 @@ test('buildAuthUrl carries the OAuth parameters Google needs', () => {
   for (const scope of ['openid', 'https://www.googleapis.com/auth/cloud-platform', 'https://www.googleapis.com/auth/cclog']) {
     assert.ok(scopes.includes(scope), `scope 缺失: ${scope}`);
   }
-  assert.ok(!scopes.includes('https://www.googleapis.com/auth/aicode'), 'aicode 未在登录客户端注册，请求即 403');
+  // aicode is registered for the public client (the live AG token carries it), so the auth
+  // URL asks for it too - only AG's login client rejects it with 403.
+  assert.ok(scopes.includes('https://www.googleapis.com/auth/aicode'), 'aicode 应随授权一起申请');
 });
 
 test('flow store issues single-use states that expire', () => {

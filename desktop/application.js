@@ -178,7 +178,9 @@ function createApplication({ rootDir, dataDir, native = false, testMode = false,
       return accounts.snapshot(live.refreshToken);
     },
     // Add an account through Google's consent screen: open the authorize URL, wait for the
-    // redirect to our own loopback API, then exchange the code for pool tokens.
+    // redirect to our own loopback API, then exchange the code for pool tokens. The auth URL
+    // must use the client AG itself refreshes with (extractOauthClients sorts it first), or
+    // the minted token expires after an hour and AG drops back to its login page.
     async startOAuth() {
       const clients = await agcred.oauthClients();
       if (!clients.length) throw new Error('未找到可用的 OAuth 客户端（无法读取 language_server.exe），请先安装 Antigravity');

@@ -9,17 +9,19 @@ const { randomUUID } = require('node:crypto');
 const AUTH_URL = 'https://accounts.google.com/o/oauth2/v2/auth';
 const CALLBACK_PATH = '/oauth-callback';
 const FLOW_TTL_MS = 10 * 60 * 1000;
-// Exactly the scopes Antigravity's own login requests (verified against the scope list of
-// a live AG-issued access token). Requesting more - e.g. aicode - makes Google reject the
-// whole authorization with 403 restricted_client, because the login client has no such
-// scope registered. access_type=offline with prompt=consent guarantees a refresh_token.
+// Exactly the scopes of a live AG access token issued by AG's public OAuth client (verified
+// with the tokeninfo endpoint: openid, aicode, cloud-platform, userinfo.email,
+// userinfo.profile, cclog, experimentsandconfigs). The aicode scope is registered for that
+// client - it only 403s on AG's other client, the one its login screen uses.
+// access_type=offline with prompt=consent guarantees a refresh_token.
 const SCOPES = [
   'openid',
   'https://www.googleapis.com/auth/cloud-platform',
   'https://www.googleapis.com/auth/userinfo.email',
   'https://www.googleapis.com/auth/userinfo.profile',
   'https://www.googleapis.com/auth/cclog',
-  'https://www.googleapis.com/auth/experimentsandconfigs'
+  'https://www.googleapis.com/auth/experimentsandconfigs',
+  'https://www.googleapis.com/auth/aicode'
 ];
 
 function buildAuthUrl({ clientId, redirectUri, state }) {

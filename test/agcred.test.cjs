@@ -8,7 +8,8 @@ const {
   parseTokenResponse,
   toRfc3339Micros,
   parseRfc3339,
-  extractOauthClients
+  extractOauthClients,
+  AG_REFRESH_CLIENT_ID
 } = require('../core/agcred');
 
 test('credential payload matches the format AG reads', () => {
@@ -164,4 +165,22 @@ test('extractOauthClients finds every client pair in a binary dump', () => {
   assert.deepEqual(clients[0], { id: idA, secret: secretA });
   assert.ok(clients.some(client => client.id === idB && client.secret === secretB));
   assert.deepEqual(extractOauthClients('nothing here'), []);
+});
+
+test('extractOauthClients leads with the client AG refreshes with', () => {
+  // The authorize URL must be built with AG's refresh client, so it has to come first even
+  // when the binary lists the other (IDE) client earlier.
+  const other = ['900000000000', 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'].join('-') + '.apps.googleusercontent.com';
+  const dump = [other, 'GOCSPX-' + 'A'.repeat(28), AG_REFRESH_CLIENT_ID, 'GOCSPX-' + 'B'.repeat(28)].join('\u0000\u0000');
+  const clients = extractOauthClients(dump);
+  assert.equal(clients[0].id, AG_REFRESH_CLIENT_ID);
+  assert.equal(clients[2].id, other, '另一个客户端的 secret 组合紧随其后');
+});
+
+test('extractOauthClients keeps the binary order when AG rotates its refresh client away', () => {
+  const only = ['900000000000', 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'].join('-') + '.apps.googleusercontent.com';
+  const dump = [only, 'GOCSPX-' + 'A'.repeat(28)].join('\u0000\u0000');
+  const clients = extractOauthClients(dump);
+  assert.equal(clients.length, 1);
+  assert.equal(clients[0].id, only, '认不出公开客户端时退回二进制里的原始顺序');
 });

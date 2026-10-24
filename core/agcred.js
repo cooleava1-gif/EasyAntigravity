@@ -23,11 +23,20 @@ function languageServerCandidates() {
   return roots.map(root => path.join(root, 'resources/bin/language_server.exe'));
 }
 
-// The OAuth clients that may hold Antigravity refresh tokens (the IDE's own client and the
-// public client manager tools authorize with) are embedded in language_server.exe.
-// Extract them at runtime: no client credentials live in this repository, and AG updates
-// that rotate them keep working. Ids and secrets are separate strings, so try every
-// pairing - a wrong pair fails fast with unauthorized_client.
+// The OAuth client AG's AuthProvider refreshes tokens with - the same public client that
+// Orbit-style managers authorize with. Verified end to end: a token issued to AG's other
+// client (the one its login screen uses) is rejected with unauthorized_client, and once
+// that token's access token expires about an hour later AG falls back to its login page,
+// which is what made freshly added accounts look like they had no account at all.
+// Authorizing with this client keeps every token EasyAG mints refreshable by AG itself.
+// The id is public by design - it travels in every authorize URL - so it can live here,
+// while the client secret is still only ever read out of language_server.exe. If AG rotates
+// the client away, the extracted clients are used in binary order as a fallback.
+const AG_REFRESH_CLIENT_ID = '1071006060591-tmhssin2h21lcre235vtolojh4g403ep.apps.googleusercontent.com';
+
+// Ids and secrets are separate strings in the binary, so every pairing is tried: a wrong
+// pair fails fast with unauthorized_client or invalid_client. The client AG refreshes with
+// leads the list so that startOAuth builds its authorize URL with it.
 function extractOauthClients(text) {
   const ids = [...new Set([...text.matchAll(/(\d{10,}-[a-z0-9]{32}\.apps\.googleusercontent\.com)/g)].map(match => match[1]))];
   const secrets = [...new Set([...text.matchAll(/GOCSPX-[A-Za-z0-9_-]{28}/g)].map(match => match[0]))];
@@ -35,7 +44,9 @@ function extractOauthClients(text) {
   for (const id of ids) {
     for (const secret of secrets) clients.push({ id, secret });
   }
-  return clients.slice(0, 4);
+  const preferred = clients.filter(client => client.id === AG_REFRESH_CLIENT_ID);
+  const rest = clients.filter(client => client.id !== AG_REFRESH_CLIENT_ID);
+  return [...preferred, ...rest].slice(0, 4);
 }
 
 async function scanBinaryForClients() {
@@ -285,5 +296,6 @@ module.exports = {
   toRfc3339Micros,
   parseRfc3339,
   extractOauthClients,
+  AG_REFRESH_CLIENT_ID,
   CRED_TARGET
 };
